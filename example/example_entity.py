@@ -7,4 +7,4 @@ class UserExample(BaseEntity):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tag: Mapped[str] = mapped_column(String(255), unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime) or datetime.now()
+    created_at: Mapped[datetime] = mapped_column(DateTime)
