@@ -37,10 +37,6 @@ class DBConnector:
     async def close(self):
         await self.pool.close()
 
-# Compiles SQLAlchemy statement and returns string result.
-def to_sql(stmt) -> str:
-    return str(stmt.compile(dialect=postgresql.dialect(paramstyle="numeric_dollar"), compile_kwargs={"literal_binds": False}))
-
 # (Brief) Custom Statement Generator - Adapted statement generator with placeholders for asyncpg queries.
 # (Usage) Can be used as fast generator for queries.
 #
@@ -48,17 +44,15 @@ class StmtGenerator:
     def __init__(self, model):
         self.sql_parts: List[str] = []
         self.model = model
-        self.index = 1
 
     def select(self, *args: str) -> "StmtGenerator":
         if not args: args = ("*", )
 
-        self.sql_parts.append(f"SELECT {','.join(args)} FROM {self.model.__tablename__} ")
+        self.sql_parts.append(f"SELECT {','.join(args)} FROM {self.model.__table_name__} ")
         return self
 
     def where(self, *args: str) -> "StmtGenerator":
-        self.sql_parts.append(f"WHERE {' and '.join(f'{x}=${i}' for i, x in enumerate(args, self.index))} ")
-        self.index += len(args)
+        self.sql_parts.append(f"WHERE {' and '.join(f'{x}=${i}' for i, x in enumerate(args, 1))} ")
         return self
 
     def order_by(self,
@@ -76,19 +70,19 @@ class StmtGenerator:
         return self
 
     def insert(self, *args: str) -> "StmtGenerator":
-        self.sql_parts.append(f"INSERT INTO {self.model.__tablename__} ({','.join(args)}) VALUES ({','.join([f'${i}' for i in range(1, len(args)+1)])}) ")
+        self.sql_parts.append(f"INSERT INTO {self.model.__table_name__} ({','.join(args)}) VALUES ({','.join([f'${i}' for i in range(1, len(args)+1)])}) ")
         return self
 
     def delete(self) -> "StmtGenerator":
-        self.sql_parts.insert(0, f"DELETE FROM {self.model.__tablename__} ")
+        self.sql_parts.insert(0, f"DELETE FROM {self.model.__table_name__} ")
         return self
 
     def update(self, *args: str) -> "StmtGenerator":
-        self.sql_parts.insert(0, f"UPDATE {self.model.__tablename__} SET {','.join([f'{x}=${i}' for i, x in enumerate(args, self.index)])} ")
+        self.sql_parts.insert(0, f"UPDATE {self.model.__table_name__} SET {','.join([f'{x}=${i}' for i, x in enumerate(args, 1)])} ")
         return self
 
-    def update_all(self, exceptions: List[str]) -> "StmtGenerator":
-        self.sql_parts.insert(0, f"UPDATE {self.model.__tablename__} SET {','.join([f'{x}=${i}' for i, x in enumerate(self.model.fields, self.index) if x not in exceptions])} ")
+    def update_all(self, exceptions:  tuple[Any, ...] | List[str]) -> "StmtGenerator":
+        self.sql_parts.insert(0, f"UPDATE {self.model.__table_name__} SET {','.join([f'{x}=${i}' for i, x in enumerate(self.model.__fields__, 1) if x not in exceptions])} ")
         return self
 
     def group_by(self, *args: str):
@@ -99,18 +93,13 @@ class StmtGenerator:
         self.sql_parts.append(f"LIMIT {lim}")
         return self
 
-    def and_o(self, *args):
-        self.sql_parts.append("AND ")
-        return self
-
-    def or_o(self):
-        self.sql_parts.append("OR ")
+    def count(self):
+        self.sql_parts.append(f'SELECT COUNT(*) FROM {self.model.__table_name__}')
         return self
 
     def sql(self) -> str:
         final_string: str = ''.join(self.sql_parts)
         self.sql_parts.clear()
-        self.index = 1
         return final_string
 
     async def value(self, conn: pg.Connection, *args: Any):

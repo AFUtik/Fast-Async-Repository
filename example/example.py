@@ -4,21 +4,20 @@ from example_entity import UserExample
 from example_repository import UserRepository
 from src.database.connection import DBConnector
 
+import time
+
 async def main():
-    db = DBConnector()
-    await db.create_pool()
-    await db.create_tables_if_not_exists()
+    connector: DBConnector = DBConnector()
+    await connector.create_pool()
 
-    async with db.get_connection() as conn:
-        if not await UserRepository.exists_by_id(conn, 1):
-            new_user = UserExample(id=1, tag='SomeTag')
+    start = time.perf_counter()
+    async with connector.get_connection() as conn:
+        for _ in range(5000):
+            await UserRepository.update(conn, UserExample(45, "6453"))
+    end = time.perf_counter()
+    print(f"Время выполнения: {end - start:.4f} секунд")
 
-            await UserRepository.insert(conn, new_user)
-
-        user: UserExample = await UserRepository.find_user(conn, 1)
-        print(user.id)
-
-    await db.close()
+    await connector.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -3,10 +3,9 @@ from functools import singledispatch
 from typing import Any, LiteralString, Callable, Set, Coroutine
 
 import asyncpg
-from asyncpg import Connection
+from asyncpg import Connection, Record
 
-from sqlalchemy import select, insert, delete, update, bindparam, func as sqlfunc
-from src.database.connection import StmtGenerator, to_sql
+from src.database.connection import StmtGenerator
 
 from src.expections import DatabaseError
 from src.database.entity import *
@@ -16,26 +15,19 @@ from src.database.cache import LRUCache, LFUCache, TTLCache
 # Class Decorator - Used to statically generate common queries for the concrete repository.
 def repository(model: BaseEntity.__class__):
     def decorator(cls):
-        model.__pk_attrs__ = tuple(col.key for col in model.__mapper__.primary_key)
-        cls._model = model
+        cls.__model__ = model
 
-        table = model.__table__
+        stmt = StmtGenerator(model=model)
 
-        cls._find_all_query = to_sql(select(table))
-        cls._find_by_id_query = to_sql(select(table).where(
-            *[col == bindparam(col.name) for col in table.primary_key.columns]
-        ))
-        cls._exists_by_id_query = to_sql(select(sqlfunc.exists(select(table).where(
-            *[col == bindparam(col.name) for col in table.primary_key.columns]
-        ).scalar_subquery())))
-        cls._insert_query = to_sql(insert(table))
-        cls._delete_by_id_query = to_sql(delete(table).where(
-            *[col == bindparam(col.name) for col in table.primary_key.columns]
-        ))
-        cls._update_query = to_sql(update(table))
-        cls._count_query = to_sql(select(sqlfunc.count()).select_from(table))
+        cls.__find_all_query__     = stmt.select().sql()
+        cls.__find_by_id_query__   = stmt.select().where(*model.__pk_attrs__).sql()
+        cls.__insert_query__       = stmt.insert(*model.__fields__).sql()
+        cls.__delete_by_id_query__ = stmt.delete().where(*model.__pk_attrs__).sql()
+        cls.__update_query__       = stmt.where(*model.__pk_attrs__).update_all(exceptions=model.__pk_attrs__).sql()
+        cls.__count_query__        = stmt.count().sql()
+
+        print(cls.__update_query__)
         return cls
-
     return decorator
 
 @singledispatch
@@ -70,9 +62,13 @@ def _(sql: str, cache: TTLCache):
                 cached: BaseEntity = cache.get(args)
                 if cached is not None: return cached
 
-                data = cls._model(**await conn.fetchrow(sql, *args))
-                cache[args] = data
-                return data
+                row = await conn.fetchrow(sql, *args)
+                if row is None: return None
+
+                entity = cls.__model__(**row)
+
+                cache[args] = entity
+                return entity
             except asyncpg.PostgresError as e:
                 raise DatabaseError() from e
         return wrapper
@@ -91,10 +87,14 @@ def _(sql: str, cache: LRUCache):
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
                 cached: BaseEntity = cache.get(args)
-                if cached is not None and cached.primary_key() in cls._cached_id: return cached
+                if cached is not None and cached.primary_key() in cls.__cache_id__: return cached
 
-                entity = cls._model(**await conn.fetchrow(sql, *args))
-                cls._cached_id.add(entity.primary_key())
+                row = await conn.fetchrow(sql, *args)
+                if row is None: return None
+
+                entity = cls.__model__(**row)
+
+                cls.__cache_id__.add(entity.primary_key())
                 cache[args] = entity
                 return entity
             except asyncpg.PostgresError as e:
@@ -110,7 +110,7 @@ def _(sql: str, cache: TTLCache = TTLCache()):
                 cached: List[BaseEntity] = cache.get(args)
                 if cached is not None: return cached
 
-                entities = [cls._model(**x) for x in await conn.fetch(sql, *args)]
+                entities = [cls.__model__(**x) for x in await conn.fetch(sql, *args)]
                 cache[args] = entities
                 return entities
             except asyncpg.PostgresError as e:
@@ -125,12 +125,12 @@ def _(sql: str, cache: LRUCache):
             try:
                 cached: List[BaseEntity] = cache.get(args)
                 if cached is not None:
-                    if all(entity.__pk_values__ in cls._cached_id for entity in cached):
+                    if all(entity.__pk_values__ in cls.__cache_id__ for entity in cached):
                         return cached
 
-                entities = [cls._model(**x) for x in await conn.fetch(sql, *args)]
+                entities = [cls.__model__(**x) for x in await conn.fetch(sql, *args)]
                 for entity in entities:
-                    cls._cached_id.add(entity.primary_key())
+                    cls.__cache_id__.add(entity.primary_key())
                 cache[args] = entities
                 return entities
             except asyncpg.PostgresError as e:
@@ -143,7 +143,7 @@ def query(sql: str):
     def decorator(func):
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
-                return cls._model(**await conn.fetchrow(sql, *args))
+                return cls.__model__(**await conn.fetchrow(sql, *args))
             except asyncpg.PostgresError as e:
                 raise DatabaseError() from e
         return wrapper
@@ -154,7 +154,7 @@ def query_all(sql: str):
     def decorator(func):
         async def  wrapper(cls, conn: Connection, *args, **kwargs):
             try:
-                return [cls._model(**x) for x in await conn.fetch(sql, *args)]
+                return [cls.__model__(**x) for x in await conn.fetch(sql, *args) if x is not None]
             except asyncpg.PostgresError as e:
                 raise DatabaseError() from e
         return wrapper
@@ -165,11 +165,8 @@ def execute(sql: str, transaction: bool = True):
     def decorator(func):
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
-                if transaction:
-                    async with conn.transaction():
+                async with conn.transaction():
                         return conn.execute(sql, *args)
-                else:
-                    return conn.execute(sql, *args)
             except asyncpg.PostgresError as e:
                 raise DatabaseError() from e
         return wrapper
@@ -177,62 +174,62 @@ def execute(sql: str, transaction: bool = True):
 
 class Repository:
     # Static fields
-    _model: BaseEntity.__class__
+    __cache_id__: Set[tuple] = set() # primary key(id)
+    __model__: BaseEntity.__class__
 
     # Default queries
-    _find_all_query:       LiteralString
-    _find_by_id_query:     LiteralString
-    _exists_by_id_query:   LiteralString
-    _insert_query:         LiteralString
-    _delete_by_id_query:   LiteralString
-    _update_query:         LiteralString
-    _count_query:          LiteralString
-
-    _cached_id: Set[tuple] = set() # primary key(id)
+    __find_all_query__:     str
+    __find_by_id_query__:   str
+    __exists_by_id_query__: str
+    __insert_query__:       str
+    __delete_by_id_query__: str
+    __update_query__:       str
+    __count_query__:        str
 
     @classmethod
     async def find_all(cls, conn: Connection) -> List[BaseEntity]:
         try:
-            return [cls._model(**x) for x in await conn.fetch(cls._find_all_query)]
+            return [cls.__model__(**x) for x in await conn.fetch(cls.__find_all_query__)]
         except asyncpg.PostgresError as e: raise DatabaseError() from e
 
     @classmethod
     async def find_by_id(cls, conn: Connection, *id: int | str | tuple) -> BaseEntity | None:
         try:
-            return cls._model(**await conn.fetchrow(cls._find_by_id_query, *id))
+            row: Record = await conn.fetchrow(cls.__find_by_id_query__, *id)
+            return cls.__model__(**row) if row else None
         except asyncpg.PostgresError as e: raise DatabaseError() from e
 
     @classmethod
     async def exists_by_id(cls, conn: Connection, id: int | str) -> bool:
         try:
-            return await conn.fetchval(cls._exists_by_id_query, id)
+            return await conn.fetchrow(cls.__find_by_id_query__, id) is not None
         except asyncpg.PostgresError as e: raise DatabaseError() from e
 
     @classmethod
     async def insert(cls, conn: Connection, entity: BaseEntity) -> None:
         try:
             async with conn.transaction():
-                await conn.execute(cls._insert_query, *tuple(getattr(entity, col.name) for col in entity.__table__.columns))
+                await conn.execute(cls.__insert_query__, *astuple(entity))
         except asyncpg.PostgresError as e: raise DatabaseError() from e
 
     @classmethod
-    async def delete_by_id(cls, conn: Connection, id) -> None:
+    async def delete_by_id(cls, conn: Connection, *id) -> None:
         try:
             async with conn.transaction():
-                cls._cached_id.discard(id)
-                await conn.execute(cls._delete_by_id_query, id)
+                cls.__cache_id__.discard(id)
+                await conn.execute(cls.__delete_by_id_query__, id)
         except asyncpg.PostgresError as e: raise DatabaseError() from e
 
     @classmethod
     async def update(cls, conn: Connection, entity: BaseEntity) -> None:
         try:
             async with conn.transaction():
-                cls._cached_id.discard(entity.primary_key())
-                await conn.execute(cls._update_query, *entity.__dict__.values())
+                cls.__cache_id__.discard(entity.primary_key())
+                await conn.execute(cls.__update_query__, *astuple(entity))
         except asyncpg.PostgresError as e: raise DatabaseError() from e
 
     @classmethod
     async def count(cls, conn: Connection) -> int:
         try:
-            return await conn.fetchval(cls._count_query)
+            return await conn.fetchval(cls.__count_query__)
         except asyncpg.PostgresError as e: raise DatabaseError() from e

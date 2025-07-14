@@ -1,10 +1,15 @@
-from src.database.entity import *
+from dataclasses import dataclass
+
+from src.database.entity import entity, BaseEntity, PrimaryKey, Varchar, Timestamp, Default
 
 from datetime import datetime
 
+@dataclass(slots=True)
+@entity(table_name="users")
 class UserExample(BaseEntity):
-    __tablename__ = "users"
+    id: PrimaryKey[int]
+    tag: Varchar[255]
+    created_at: Default[Timestamp] = datetime.now()
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tag: Mapped[str] = mapped_column(String(255), unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime)
+    # It's optional, but it makes faster getting primary keys from entity.
+    def primary_key(self) -> tuple: return (id, )
