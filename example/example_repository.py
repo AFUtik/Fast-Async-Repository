@@ -1,5 +1,5 @@
-from src.asyncrepository.repository import Repository, repository, query_lru, query_ttl
-from src.asyncrepository.connection import StmtGenerator
+from asyncrepository.repository import Repository, repository, query_lru, query_ttl
+from asyncrepository.connection import StmtGenerator
 
 from example_entity import UserExample, TimestampEntity
 

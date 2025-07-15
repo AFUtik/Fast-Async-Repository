@@ -4,10 +4,10 @@ from typing import Set, List
 import asyncpg
 from asyncpg import Connection
 
-from src.asyncrepository.connection import StmtGenerator
-from src.asyncrepository.expections import DatabaseError
-from src.asyncrepository.entity import BaseEntity
-from src.asyncrepository.cache import LRUCache, TTLCache
+from asyncrepository.connection import StmtGenerator
+from asyncrepository.expections import DatabaseError
+from asyncrepository.entity import BaseEntity
+from asyncrepository.cache import LRUCache, TTLCache
 
 # Class Decorator - Used to statically generate common queries for the concrete repository.
 def repository(model: BaseEntity.__class__ = None):

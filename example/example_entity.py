@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from src.asyncrepository.entity import entity, BaseEntity, PrimaryKey, Varchar, Timestamp, Default
+from asyncrepository.entity import entity, BaseEntity, PrimaryKey, Varchar, Timestamp, Default
 
 from datetime import datetime
 

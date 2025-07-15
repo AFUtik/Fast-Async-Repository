@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 import asyncpg as pg
 
-from src.asyncrepository.config import config
+from asyncrepository.config import config
 
 db_config = config.database
 conn_string = f"postgresql://{db_config.username}:{db_config.password}@{db_config.host}:{db_config.port}/{db_config.name}"

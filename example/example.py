@@ -2,7 +2,7 @@ import asyncio
 import time
 
 from example_repository import UserRepository
-from src.asyncrepository.connection import DBConnector
+from asyncrepository.connection import DBConnector
 
 
 async def main():
