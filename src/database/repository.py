@@ -1,49 +1,32 @@
-from dataclasses import dataclass, astuple
-from functools import singledispatch
-from typing import Any, LiteralString, Callable, Set, Coroutine
+from dataclasses import astuple
+from typing import Set, List
 
 import asyncpg
-from asyncpg import Connection, Record
+from asyncpg import Connection
 
 from src.database.connection import StmtGenerator
 
 from src.expections import DatabaseError
-from src.database.entity import *
+from src.database.entity import BaseEntity
 
-from src.database.cache import LRUCache, LFUCache, TTLCache
+from src.database.cache import LRUCache, TTLCache
 
 # Class Decorator - Used to statically generate common queries for the concrete repository.
-def repository(model: BaseEntity.__class__):
+def repository(model: BaseEntity.__class__ = None):
     def decorator(cls):
+        if model is None: return cls
+
         cls.__model__ = model
 
         stmt = StmtGenerator(model=model)
 
         cls.__find_all_query__     = stmt.select().sql()
-        cls.__find_by_id_query__   = stmt.select().where(*model.__pk_attrs__).sql()
-        cls.__insert_query__       = stmt.insert(*model.__fields__).sql()
-        cls.__delete_by_id_query__ = stmt.delete().where(*model.__pk_attrs__).sql()
-        cls.__update_query__       = stmt.where(*model.__pk_attrs__).update_all(exceptions=model.__pk_attrs__).sql()
+        cls.__find_by_id_query__   = stmt.select().where(model.__key__).sql()
+        cls.__insert_query__       = stmt.insert(model.__key__).sql()
+        cls.__delete_by_id_query__ = stmt.delete().where(model.__key__).sql()
+        cls.__update_query__       = stmt.update_all(exceptions=model.__key__).where(model.__key__).sql()
         cls.__count_query__        = stmt.count().sql()
-
-        print(cls.__update_query__)
         return cls
-    return decorator
-
-@singledispatch
-def cache_entity(sql, cache):
-    def decorator(func):
-        async def wrapper(cls, *args, **kwargs):
-            return func(cls, *args, **kwargs)
-        return wrapper
-    return decorator
-
-@singledispatch
-def cache_entities(sql, cache):
-    def decorator(func):
-        async def wrapper(cls, *args, **kwargs):
-            return func(cls, *args, **kwargs)
-        return wrapper
     return decorator
 
 # (Brief) Takes entity from the cache if exists. Checks whether entity is old by comparing current time
@@ -54,9 +37,14 @@ def cache_entities(sql, cache):
 #   sql (string) - SQL Query
 #   cache (LRUCache or LFUCache) - Cache class
 #
-@cache_entity.register
-def _(sql: str, cache: TTLCache):
+def query_ttl(
+        model: BaseEntity.__class__,
+        sql: str,
+        cache_capacity: int = 256,
+        cache_expire: float = 60.0
+):
     def decorator(func):
+        cache = TTLCache(cache_capacity, cache_expire)
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
                 cached: BaseEntity = cache.get(args)
@@ -65,7 +53,7 @@ def _(sql: str, cache: TTLCache):
                 row = await conn.fetchrow(sql, *args)
                 if row is None: return None
 
-                entity = cls.__model__(**row)
+                entity = model(**row)
 
                 cache[args] = entity
                 return entity
@@ -78,23 +66,31 @@ def _(sql: str, cache: TTLCache):
 # (Usage) If you delete or change entities frequently, it can be not effective.
 #
 # (Params)
+#   model (class of Model)
 #   sql (string) - SQL Query
-#   cache (LRUCache or LFUCache) - Cache class
+#   cache_key (name of entity's identifier)
+#   cache (Cache class)
 #
-@cache_entity.register
-def _(sql: str, cache: LRUCache):
+def query_lru(
+        model: BaseEntity.__class__,
+        sql: str,
+        input_id: bool = False,
+        cache_key: str="",
+        cache_capacity: int = 256,
+):
     def decorator(func):
+        cache = LRUCache(cache_capacity)
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
                 cached: BaseEntity = cache.get(args)
-                if cached is not None and cached.primary_key() in cls.__cache_id__: return cached
+                if cached is not None and (getattr(cached, cache_key) if not input_id else args): return cached
 
                 row = await conn.fetchrow(sql, *args)
                 if row is None: return None
 
-                entity = cls.__model__(**row)
+                entity = model(**row)
 
-                cls.__cache_id__.add(entity.primary_key())
+                cls.__cache_id__.add(getattr(entity, cache_key) if not input_id else args)
                 cache[args] = entity
                 return entity
             except asyncpg.PostgresError as e:
@@ -102,15 +98,20 @@ def _(sql: str, cache: LRUCache):
         return wrapper
     return decorator
 
-@cache_entities.register
-def _(sql: str, cache: TTLCache = TTLCache()):
+def query_all_ttl(
+        model: BaseEntity.__class__,
+        sql: str,
+        cache_capacity: int = 256,
+        cache_expire: float = 60.0
+):
     def decorator(func):
+        cache = TTLCache(cache_capacity, cache_expire)
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
                 cached: List[BaseEntity] = cache.get(args)
                 if cached is not None: return cached
 
-                entities = [cls.__model__(**x) for x in await conn.fetch(sql, *args)]
+                entities = [model(**x) for x in await conn.fetch(sql, *args)]
                 cache[args] = entities
                 return entities
             except asyncpg.PostgresError as e:
@@ -118,19 +119,25 @@ def _(sql: str, cache: TTLCache = TTLCache()):
         return wrapper
     return decorator
 
-@cache_entities.register
-def _(sql: str, cache: LRUCache):
+def query_all_lru(
+        model: BaseEntity.__class__,
+        sql: str,
+        input_id: bool = False,
+        cache_key: str = "",
+        cache_capacity: int = 256
+):
     def decorator(func):
+        cache = LRUCache(cache_capacity)
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
                 cached: List[BaseEntity] = cache.get(args)
                 if cached is not None:
-                    if all(entity.__pk_values__ in cls.__cache_id__ for entity in cached):
+                    if all(getattr(entity, cache_key) if not input_id else args in cls.__cache_id__ for entity in cached):
                         return cached
 
-                entities = [cls.__model__(**x) for x in await conn.fetch(sql, *args)]
+                entities = [model(**x) for x in await conn.fetch(sql, *args)]
                 for entity in entities:
-                    cls.__cache_id__.add(entity.primary_key())
+                    cls.__cache_id__.add(getattr(entity, cache_key) if not input_id else args)
                 cache[args] = entities
                 return entities
             except asyncpg.PostgresError as e:
@@ -139,11 +146,11 @@ def _(sql: str, cache: LRUCache):
     return decorator
 
 # (Brief) Fetches the entity from a query. Does not use cache.
-def query(sql: str):
+def query(model: BaseEntity.__class__,sql: str):
     def decorator(func):
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
-                return cls.__model__(**await conn.fetchrow(sql, *args))
+                return model(*await conn.fetchrow(sql, *args))
             except asyncpg.PostgresError as e:
                 raise DatabaseError() from e
         return wrapper
@@ -154,14 +161,14 @@ def query_all(sql: str):
     def decorator(func):
         async def  wrapper(cls, conn: Connection, *args, **kwargs):
             try:
-                return [cls.__model__(**x) for x in await conn.fetch(sql, *args) if x is not None]
+                return [cls.__model__(**x) for x in await conn.fetch(sql, *args)]
             except asyncpg.PostgresError as e:
                 raise DatabaseError() from e
         return wrapper
     return decorator
 
 # Method Decorator - Executes SQL queries without returning anything.
-def execute(sql: str, transaction: bool = True):
+def execute(sql: str):
     def decorator(func):
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
@@ -195,7 +202,7 @@ class Repository:
     @classmethod
     async def find_by_id(cls, conn: Connection, *id: int | str | tuple) -> BaseEntity | None:
         try:
-            row: Record = await conn.fetchrow(cls.__find_by_id_query__, *id)
+            row = await conn.fetchrow(cls.__find_by_id_query__, *id)
             return cls.__model__(**row) if row else None
         except asyncpg.PostgresError as e: raise DatabaseError() from e
 

@@ -1,10 +1,9 @@
 import asyncio
+import time
 
-from example_entity import UserExample
 from example_repository import UserRepository
 from src.database.connection import DBConnector
 
-import time
 
 async def main():
     connector: DBConnector = DBConnector()
@@ -13,7 +12,8 @@ async def main():
     start = time.perf_counter()
     async with connector.get_connection() as conn:
         for _ in range(5000):
-            await UserRepository.update(conn, UserExample(45, "6453"))
+            date = await UserRepository.find_user(conn, 45)
+    print(date.created_at)
     end = time.perf_counter()
     print(f"Время выполнения: {end - start:.4f} секунд")
 

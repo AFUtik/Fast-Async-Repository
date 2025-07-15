@@ -42,18 +42,19 @@ class Varchar(Generic[T]):
 
 class BaseEntity:
     __fields__:    tuple[str] = ()
-    __pk_attrs__:  tuple[str] = ()
-    __pk_values__: tuple = ()
+    __key__: str = ""
 
-    __table_name__: str = ""
-
-    def primary_key(self) -> tuple:
-        if not self.__pk_values__: self.__pk_values__ = tuple(getattr(self, attr) for attr in self.__pk_attrs__)
-        return self.__pk_values__
-
-def entity(table_name: str):
+def entity(table_name: str, nullable: bool = False):
     def decorator(cls):
-        cls.__pk_attrs__ = tuple(x for x in cls.__annotations__ if isinstance(cls.__annotations__[x], PrimaryKey))
+        if nullable:
+            for name in cls.__annotations__:
+                if not hasattr(cls, name):
+                    setattr(cls, name, None)
+
+        for x in cls.__annotations__:
+            if isinstance(cls.__annotations__[x], PrimaryKey):
+                cls.__key__ = x
+                break
         cls.__fields__   = cls.__annotations__.keys()
         cls.__table_name__ = table_name
 
