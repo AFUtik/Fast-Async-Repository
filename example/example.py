@@ -2,7 +2,7 @@ import asyncio
 import time
 
 from example_repository import UserRepository
-from src.database.connection import DBConnector
+from src.asyncrepository.connection import DBConnector
 
 
 async def main():
@@ -12,8 +12,7 @@ async def main():
     start = time.perf_counter()
     async with connector.get_connection() as conn:
         for _ in range(5000):
-            date = await UserRepository.find_user(conn, 45)
-    print(date.created_at)
+            date = await UserRepository.fetch_date_by_user_id(conn, 45)
     end = time.perf_counter()
     print(f"Время выполнения: {end - start:.4f} секунд")
 

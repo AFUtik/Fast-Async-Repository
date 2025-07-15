@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from src.database.entity import entity, BaseEntity, PrimaryKey, Varchar, Timestamp, Default
+from src.asyncrepository.entity import entity, BaseEntity, PrimaryKey, Varchar, Timestamp, Default
 
 from datetime import datetime
 
@@ -15,3 +15,4 @@ class UserExample(BaseEntity):
 @entity(table_name="users", nullable=True)
 class TimestampEntity:
     created_at: str
+    id: int

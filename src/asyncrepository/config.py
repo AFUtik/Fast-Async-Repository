@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RESOURCE_DIR=os.getenv("RESOURCE_DIR")
 
 def read_file(path: str) -> str:
     with open(path, 'r') as f:
@@ -20,8 +20,7 @@ class DatabaseConfig:
     host: str = os.getenv("DB_HOST") or sys.exit("Environment variable DB_HOST is required")
     ssl = os.getenv("DB_SSL_MODE", "disable")
 
-    schema: str = read_file(os.path.join(BASE_DIR, "../resources/sql/schema.sql"))
-    delete_schema: str = read_file(os.path.join(BASE_DIR, "../resources/sql/schema.sql"))
+    schema: str = read_file(os.path.join(RESOURCE_DIR, os.getenv("DB_SCHEMA")))
 
 @dataclass(frozen=True)
 class Config:

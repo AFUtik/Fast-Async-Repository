@@ -1,11 +1,9 @@
-from typing import List, Any, LiteralString, Dict
+from typing import List, Any
 from contextlib import asynccontextmanager
 
 import asyncpg as pg
 
-from src.config import config
-
-from sqlalchemy.dialects import postgresql
+from src.asyncrepository.config import config
 
 db_config = config.database
 conn_string = f"postgresql://{db_config.username}:{db_config.password}@{db_config.host}:{db_config.port}/{db_config.name}"
@@ -21,13 +19,6 @@ class DBConnector:
     async def get_connection(self):
         async with self.pool.acquire() as conn:
             yield conn
-
-    # USE ONLY FOR DEVELOPING YOUR DATABASE. THIS WILL DELETE ALL DATA IN TABLES #
-    async def reset_tables(self):
-        async with self.get_connection() as conn:
-            async with conn.transaction():
-                await conn.execute(db_config.delete_schema)
-                await conn.execute(db_config.schema)
 
     async def create_tables_if_not_exists(self):
         async with self.get_connection() as conn:

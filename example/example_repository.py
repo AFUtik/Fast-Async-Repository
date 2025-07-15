@@ -1,7 +1,5 @@
-from src.database.cache import LRUCache, TTLCache
-from src.database.repository import Repository, repository, query_lru, query_ttl
-from src.database.connection import StmtGenerator
-from src.database.repository import query
+from src.asyncrepository.repository import Repository, repository, query_lru, query_ttl
+from src.asyncrepository.connection import StmtGenerator
 
 from example_entity import UserExample, TimestampEntity
 
@@ -20,7 +18,7 @@ class UserRepository(Repository):
     @classmethod
     @query_ttl(
         model=TimestampEntity,
-        sql=StmtGenerator(model=UserExample).select('created_at').where('id').sql(),
+        sql=StmtGenerator(model=UserExample).select('id').where('id').sql(),
         cache_capacity=256,
         cache_expire=60.0
     )
