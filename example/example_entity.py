@@ -11,9 +11,6 @@ class UserExample(BaseEntity):
     tag: Varchar[255]
     created_at: Default[Timestamp] = datetime.now()
 
-    # It's optional, but it makes faster getting primary keys from entity.
-    def primary_key(self) -> tuple: return (id, )
-
 @dataclass(slots=True)
 @entity(table_name="users", nullable=True)
 class TimestampEntity:
