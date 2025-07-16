@@ -72,23 +72,23 @@ def query_ttl(
 def query_lru(
         model: BaseEntity.__class__,
         sql: str,
-        input_id: bool = False,
         cache_key: str="",
         cache_capacity: int = 256,
+        args_cache_key: bool = False,
 ):
     def decorator(func):
         cache = LRUCache(cache_capacity)
         async def wrapper(cls, conn: Connection, *args, **kwargs):
             try:
                 cached: BaseEntity = cache.get(args)
-                if cached is not None and (getattr(cached, cache_key) if not input_id else args): return cached
+                if cached is not None and (getattr(cached, cache_key) if not args_cache_key else args): return cached
 
                 row = await conn.fetchrow(sql, *args)
                 if row is None: return None
 
                 entity = model(**row)
 
-                cls.__cache_id__.add(getattr(entity, cache_key) if not input_id else args)
+                cls.__cache_id__.add(getattr(entity, cache_key) if not args_cache_key else args)
                 cache[args] = entity
                 return entity
             except asyncpg.PostgresError as e:
@@ -120,9 +120,9 @@ def query_all_ttl(
 def query_all_lru(
         model: BaseEntity.__class__,
         sql: str,
-        input_id: bool = False,
         cache_key: str = "",
-        cache_capacity: int = 256
+        cache_capacity: int = 256,
+        args_cache_key: bool = False
 ):
     def decorator(func):
         cache = LRUCache(cache_capacity)
@@ -130,12 +130,12 @@ def query_all_lru(
             try:
                 cached: List[BaseEntity] = cache.get(args)
                 if cached is not None:
-                    if all(getattr(entity, cache_key) if not input_id else args in cls.__cache_id__ for entity in cached):
+                    if all(getattr(entity, cache_key) if not args_cache_key else args in cls.__cache_id__ for entity in cached):
                         return cached
 
                 entities = [model(**x) for x in await conn.fetch(sql, *args)]
                 for entity in entities:
-                    cls.__cache_id__.add(getattr(entity, cache_key) if not input_id else args)
+                    cls.__cache_id__.add(getattr(entity, cache_key) if not args_cache_key else args)
                 cache[args] = entities
                 return entities
             except asyncpg.PostgresError as e:

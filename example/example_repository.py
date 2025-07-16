@@ -9,7 +9,7 @@ class UserRepository(Repository):
     @query_lru(
         model=UserExample,
         sql=StmtGenerator(model=UserExample).select().where('id').sql(), # Sql query compiled to string.
-        input_id=True,
+        args_cache_key=True,
         cache_key="id", # CACHE KEY - Name of Entity's identifier
         cache_capacity=256 # Optional Parameter, you can create cache with custom capacity.
     )

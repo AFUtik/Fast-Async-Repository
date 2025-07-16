@@ -20,7 +20,7 @@ class DBConnector:
         async with self.pool.acquire() as conn:
             yield conn
 
-    async def create_tables_if_not_exists(self):
+    async def schema(self):
         async with self.get_connection() as conn:
             async with conn.transaction():
                 await conn.execute(db_config.schema)
